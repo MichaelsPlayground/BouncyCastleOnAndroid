@@ -24,7 +24,7 @@
         android:layout_marginStart="8dp"
         android:layout_marginTop="16dp"
         android:layout_marginEnd="8dp"
-        android:hint="choose algorithm to run and WAIT"
+        android:hint="choose project to run and WAIT"
         >
 
         <AutoCompleteTextView

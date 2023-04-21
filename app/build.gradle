@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace 'de.androidcrypto.asconencryptionbc'
+    namespace 'de.androidcrypto.bouncycastleonandroid'
     compileSdk 33
 
     defaultConfig {
-        applicationId "de.androidcrypto.asconencryptionbc"
+        applicationId "de.androidcrypto.bouncycastleonandroid"
         minSdk 21
         targetSdk 33
         versionCode 1
