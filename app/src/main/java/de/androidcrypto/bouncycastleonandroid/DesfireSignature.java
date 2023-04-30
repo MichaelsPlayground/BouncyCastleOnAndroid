@@ -8,6 +8,7 @@ import org.bouncycastle.math.ec.ECCurve;
 
 import java.io.IOException;
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
 import java.security.KeyFactory;
@@ -51,9 +52,132 @@ public class DesfireSignature {
         byte[] tagSignatureByte = Utils.hexToBytes(tagSignatureString);
         byte[] tagIdByte = Utils.hexToBytes(tagIdString);
 
+        // quick check
+
+        String pubKeyNxpString1 = "040E98E117AAA36457F43173DC920A8757267F44CE4EC5ADD3C54075571AEBBF7B942A9774A1D94AD02572427E5AE0A2DD36591B1FB34FCF3D";
+        String pubKeyNxpString2 = "04B304DC4C615F5326FE9383DDEC9AA892DF3A57FA7FFB3276192BC0EAA252ED45A865E3B093A3D0DCE5BE29E92F1392CE7DE321E3E5C52B3A";
+        String tIdString = "04597a32501490";
+        String tSignatureString = "23b80023f6f970be3b9d47908cb80b284c7c6f8d8a25509e741af818271e9010279f449138df1e2d2c0cf37b1b677dc4354fbb97ca2e7581";
+        boolean signatureCheck = checkDesfireSignature(pubKeyNxpString1, tIdString, tSignatureString);
+        printX("SigCheck " + signatureCheck+ " tagId " + tagIdString + " pub: " + publicKeyNxpString);
+
+
+        if (tagIdByte == null) {
+
+
+            ECPublicKey ecPubKey = null;
+            try {
+                ecPubKey = decodeKeySecp224r1(publicKeyNxp);
+            } catch (InvalidKeySpecException | NoSuchAlgorithmException |
+                     NoSuchProviderException e) {
+                //throw new RuntimeException(e);
+                printX("Error in decoding EC Public Key: " + e.getMessage());
+            }
+
+            PublicKey pubKey = null;
+            if (ecPubKey == null) {
+                printX("ecPubKey is NULL");
+            } else {
+                printX("2 ecPubKey: " + ecPubKey.toString());
+                pubKey = (PublicKey) ecPubKey;
+                printX("2 pubKey: " + pubKey.toString());
+
+                printX("3 verify the signature");
+                printX("signature length: " + tagSignatureByte.length + " data: " + Utils.bytesToHex(tagSignatureByte));
+                boolean sigCheck = false;
+                try {
+                    sigCheck = checkEcdsaSignatureEcPubKey(ecPubKey, tagSignatureByte, tagIdByte);
+                } catch (NoSuchAlgorithmException e) {
+                    //throw new RuntimeException(e);
+                    printX("Error in checkEcdsaSignatureEcPubKey: " + e.getMessage());
+                }
+                printX("4 verify the signature result: " + String.valueOf(sigCheck));
+            }
+
+            boolean sigVer = false;
+            try {
+                printX("Bouncy Castle PubKey with native check");
+                printX("in checkEcdsaSignature publicKey: " + pubKey.toString());
+                printX("Bouncy pubKey: " + Utils.bytesToHex(pubKey.getEncoded()));
+                printX("Bouncy pubKey: " + pubKey.getAlgorithm());
+                //printX("data = tagUid: " + Utils.bytesToHex(data));
+                //printX("signature: " + Utils.bytesToHex(signature));
+
+                final Signature dsa = Signature.getInstance("NONEwithECDSA");
+                dsa.initVerify(pubKey);
+                dsa.update(tagIdByte);
+                //return dsa.verify(derEncodeSignature(signature)); // for secp224r1
+                byte[] derEncodedSignature = derEncodeSignatureSecp224r1(tagSignatureByte);
+                printX("derEncodedSignature: " + Utils.bytesToHex(derEncodedSignature));
+                sigVer = dsa.verify(derEncodedSignature); // for secp224r1
+            } catch (final SignatureException | InvalidKeyException |
+                           NoSuchAlgorithmException e) {
+                e.printStackTrace();
+            }
+            printX("sigCheck OK: " + sigVer);
+
+
+            printX("");
+            printX("DesFire signature verification without BC");
+            boolean sigCheckNative = false;
+            try {
+                sigCheckNative = checkEcdsaSignature(publicKeyNxpString, tagSignatureByte, tagIdByte);
+            } catch (NoSuchAlgorithmException e) {
+                //throw new RuntimeException(e);
+                printX("Error in checkEcdsaSignature: " + e.getMessage());
+            }
+            printX("4 verify the signature native result: " + String.valueOf(sigCheckNative));
+
+
+            printX("");
+            printX("Other method to get the key");
+            String name = "secp224r1";
+            int size = 224;
+            byte[] head = new byte[0];
+            try {
+                head = createHeadForNamedCurve(name, size);
+            } catch (NoSuchAlgorithmException | InvalidAlgorithmParameterException |
+                     IOException e) {
+                //throw new RuntimeException(e);
+                printX("Error: " + e.getMessage());
+            }
+            printX("header for method: " + Utils.base64Encoding(head));
+            byte[] w = Utils.hexToBytes("0E98E117AAA36457F43173DC920A8757267F44CE4EC5ADD3C54075571AEBBF7B942A9774A1D94AD02572427E5AE0A2DD36591B1FB34FCF3D");
+            ECPublicKey key = null;
+            try {
+                key = generateP256PublicKeyFromFlatW(w);
+            } catch (InvalidKeySpecException e) {
+                throw new RuntimeException(e);
+            }
+            printX("pKey: " + key.toString());
+            printX("pKey: " + Utils.bytesToHex(key.getEncoded()));
+            printX("3 verify the signature");
+            printX("signature length: " + tagSignatureByte.length + " data: " + Utils.bytesToHex(tagSignatureByte));
+            boolean sigCheck = false;
+            try {
+                sigCheck = checkEcdsaSignatureEcPubKey(ecPubKey, tagSignatureByte, tagIdByte);
+            } catch (NoSuchAlgorithmException e) {
+                //throw new RuntimeException(e);
+                printX("Error in checkEcdsaSignatureEcPubKey: " + e.getMessage());
+            }
+            printX("4 verify the signature result: " + String.valueOf(sigCheck));
+
+        }
+
+        return sb.toString();
+    }
+
+    /**
+     * this is the code using Bouncy Castle start
+     */
+
+    // complete check
+    public static boolean checkDesfireSignature(String publicKey, String tagId, String tagSignature) {
+        byte[] tagSignatureByte = Utils.hexToBytes(tagSignature);
+        byte[] tagIdByte = Utils.hexToBytes(tagId);
         ECPublicKey ecPubKey = null;
         try {
-            ecPubKey = decodeKeySecp224r1(publicKeyNxp);
+            ecPubKey = decodeKeySecp224r1(Utils.hexToBytes(publicKey));
         } catch (InvalidKeySpecException | NoSuchAlgorithmException | NoSuchProviderException e) {
             //throw new RuntimeException(e);
             printX("Error in decoding EC Public Key: " + e.getMessage());
@@ -99,61 +223,9 @@ public class DesfireSignature {
                        NoSuchAlgorithmException e) {
             e.printStackTrace();
         }
-        printX("sigCheck: " + sigVer);
-
-
-
-        printX("");
-        printX("DesFire signature verification wihout BC");
-        boolean sigCheckNative = false;
-        try {
-            sigCheckNative = checkEcdsaSignature(publicKeyNxpString, tagSignatureByte, tagIdByte);
-        } catch (NoSuchAlgorithmException e) {
-            //throw new RuntimeException(e);
-            printX("Error in checkEcdsaSignature: " + e.getMessage());
-        }
-        printX("4 verify the signature native result: " + String.valueOf(sigCheckNative));
-
-
-        printX("");
-        printX("Other method to get the key");
-        String name = "secp224r1";
-        int size = 224;
-        byte[] head = new byte[0];
-        try {
-            head = createHeadForNamedCurve(name, size);
-        } catch (NoSuchAlgorithmException | InvalidAlgorithmParameterException | IOException e) {
-            //throw new RuntimeException(e);
-            printX("Error: " + e.getMessage());
-        }
-        printX("header for method: " + Utils.base64Encoding(head));
-        byte[] w = Utils.hexToBytes("0E98E117AAA36457F43173DC920A8757267F44CE4EC5ADD3C54075571AEBBF7B942A9774A1D94AD02572427E5AE0A2DD36591B1FB34FCF3D");
-        ECPublicKey key = null;
-        try {
-            key = generateP256PublicKeyFromFlatW(w);
-        } catch (InvalidKeySpecException e) {
-            throw new RuntimeException(e);
-        }
-        printX("pKey: " + key.toString());
-        printX("pKey: " + Utils.bytesToHex(key.getEncoded()));
-        printX("3 verify the signature");
-        printX("signature length: " + tagSignatureByte.length + " data: " + Utils.bytesToHex(tagSignatureByte));
-        boolean sigCheck = false;
-        try {
-            sigCheck = checkEcdsaSignatureEcPubKey(ecPubKey, tagSignatureByte, tagIdByte);
-        } catch (NoSuchAlgorithmException e) {
-            //throw new RuntimeException(e);
-            printX("Error in checkEcdsaSignatureEcPubKey: " + e.getMessage());
-        }
-        printX("4 verify the signature result: " + String.valueOf(sigCheck));
-
-
-        return sb.toString();
+        return sigVer;
     }
 
-    /**
-     * this is the code using Bouncy Castle start
-     */
 
     // https://stackoverflow.com/a/33347595/8166854
     public static ECPublicKey decodeKeySecp224r1(byte[] encoded) throws InvalidKeySpecException, NoSuchAlgorithmException, NoSuchProviderException {
@@ -457,10 +529,6 @@ public class DesfireSignature {
         byte[] encoded = kp.getPublic().getEncoded();
         return Arrays.copyOf(encoded, encoded.length - 2 * (size / Byte.SIZE));
     }
-
-
-
-
 
     private static void printX(String message) {
         System.out.println(message);
