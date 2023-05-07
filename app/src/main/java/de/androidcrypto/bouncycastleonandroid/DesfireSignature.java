@@ -35,6 +35,53 @@ public class DesfireSignature {
 
     private static StringBuilder sb;
 
+    public static String doDesfireLightSignature() {
+        sb = new StringBuilder();
+
+        // this code uses the data from MIFARE DESFire Light Features and Hints AN12343, pages 86 - 88, https://www.nxp.com/docs/en/application-note/AN12343.pdf
+        byte[] signature = Utils.hexToBytes("1CA298FC3F0F04A329254AC0DF7A3EB8E756C076CD1BAAF47B8BBA6DCD78BCC64DFD3E80E679D9A663CAE9E4D4C2C77023077CC549CE4A61"); // 56 bytes
+        byte[] uid = Utils.hexToBytes("045A115A346180"); // 7 bytes
+        // Public Key point coordinate xD 0E98E117AAA36457F43173DC920A8757267F44CE4EC5ADD3C5407557
+        // Public Key point coordinate yD 1AEBBF7B942A9774A1D94AD02572427E5AE0A2DD36591B1FB34FCF3D
+        byte[] nxp_PubKeyDfLightWithoutRepresentation = Utils.hexToBytes("0E98E117AAA36457F43173DC920A8757267F44CE4EC5ADD3C54075571AEBBF7B942A9774A1D94AD02572427E5AE0A2DD36591B1FB34FCF3D");
+        String SEC1_Point_Representation = "04";
+        byte[] nxp_PubKeyDfLight = Utils.hexToBytes("040E98E117AAA36457F43173DC920A8757267F44CE4EC5ADD3C54075571AEBBF7B942A9774A1D94AD02572427E5AE0A2DD36591B1FB34FCF3D");
+        String curve = "secp224r1";
+
+        sb.append("Signature validation of a DESFire Light card").append("\n");
+        sb.append(printData("UID", uid)).append("\n");
+        sb.append(printData("signature", signature)).append("\n");
+        sb.append("curve:").append(curve).append("\n");
+        sb.append(printData("pubKey", nxp_PubKeyDfLight)).append("\n");
+        sb.append("\n");
+        sb.append("1 check signature with BouncyCastle").append("\n");
+        boolean signatureCheck = checkDesfireSignatureBc(nxp_PubKeyDfLight, uid, signature);
+        printX("SigCheck " + signatureCheck);
+
+        sb.append("\n");
+        sb.append("2 check signature with native Java").append("\n");
+        ECPublicKey ecPubKey = null;
+        try {
+            ecPubKey = generateP256PublicKeyFromUncompressedW(nxp_PubKeyDfLight);
+        } catch (InvalidKeySpecException e) {
+            //throw new RuntimeException(e);
+            sb.append("Error on getting the key (native Java): " + e.getMessage()).append("\n");
+        }
+        boolean sigCheck = false;
+        try {
+            sigCheck = checkEcdsaSignatureEcPubKey(ecPubKey, signature, uid);
+        } catch (NoSuchAlgorithmException e) {
+            //throw new RuntimeException(e);
+            sb.append("Error in checkEcdsaSignatureEcPubKey: " + e.getMessage()).append("\n");
+        }
+        sb.append("verify the signature result: " + String.valueOf(sigCheck)).append("\n");
+
+
+        return sb.toString();
+    }
+
+
+
     public static String doDesfireSignature() {
         sb = new StringBuilder();
 
@@ -58,7 +105,7 @@ public class DesfireSignature {
         String pubKeyNxpString2 = "04B304DC4C615F5326FE9383DDEC9AA892DF3A57FA7FFB3276192BC0EAA252ED45A865E3B093A3D0DCE5BE29E92F1392CE7DE321E3E5C52B3A";
         String tIdString = "04597a32501490";
         String tSignatureString = "23b80023f6f970be3b9d47908cb80b284c7c6f8d8a25509e741af818271e9010279f449138df1e2d2c0cf37b1b677dc4354fbb97ca2e7581";
-        boolean signatureCheck = checkDesfireSignature(pubKeyNxpString1, tIdString, tSignatureString);
+        boolean signatureCheck = checkDesfireSignatureBcString(pubKeyNxpString1, tIdString, tSignatureString);
         printX("SigCheck " + signatureCheck+ " tagId " + tagIdString + " pub: " + publicKeyNxpString);
 
 
@@ -94,6 +141,7 @@ public class DesfireSignature {
                 printX("4 verify the signature result: " + String.valueOf(sigCheck));
             }
 
+            printX("");
             boolean sigVer = false;
             try {
                 printX("Bouncy Castle PubKey with native check");
@@ -171,8 +219,60 @@ public class DesfireSignature {
      * this is the code using Bouncy Castle start
      */
 
+    public static boolean checkDesfireSignatureBc(byte[] publicKeyByte, byte[] tagIdByte, byte[] tagSignatureByte) {
+        ECPublicKey ecPubKey = null;
+        try {
+            ecPubKey = decodeKeySecp224r1(publicKeyByte);
+        } catch (InvalidKeySpecException | NoSuchAlgorithmException | NoSuchProviderException e) {
+            //throw new RuntimeException(e);
+            printX("Error in decoding EC Public Key: " + e.getMessage());
+        }
+
+        PublicKey pubKey = null;
+        if (ecPubKey == null) {
+            printX("ecPubKey is NULL");
+        } else {
+            printX("2 ecPubKey: " + ecPubKey.toString());
+            pubKey = (PublicKey) ecPubKey;
+            printX("2 pubKey: " + pubKey.toString());
+
+            printX("3 verify the signature");
+            printX("signature length: " + tagSignatureByte.length + " data: " + Utils.bytesToHex(tagSignatureByte));
+            boolean sigCheck = false;
+            try {
+                sigCheck = checkEcdsaSignatureEcPubKey(ecPubKey, tagSignatureByte, tagIdByte);
+            } catch (NoSuchAlgorithmException e) {
+                //throw new RuntimeException(e);
+                printX("Error in checkEcdsaSignatureEcPubKey: " + e.getMessage());
+            }
+            printX("4 verify the signature result: " + String.valueOf(sigCheck));
+        }
+
+        boolean sigVer = false;
+        try {
+            printX("Bouncy Castle PubKey with native check");
+            printX("in checkEcdsaSignature publicKey: " + pubKey.toString());
+            printX("Bouncy pubKey: " + Utils.bytesToHex(pubKey.getEncoded()));
+            printX("Bouncy pubKey: " + pubKey.getAlgorithm());
+            //printX("data = tagUid: " + Utils.bytesToHex(data));
+            //printX("signature: " + Utils.bytesToHex(signature));
+
+            final Signature dsa = Signature.getInstance("NONEwithECDSA");
+            dsa.initVerify(pubKey);
+            dsa.update(tagIdByte);
+            //return dsa.verify(derEncodeSignature(signature)); // for secp224r1
+            byte[] derEncodedSignature = derEncodeSignatureSecp224r1(tagSignatureByte);
+            printX("derEncodedSignature: " + Utils.bytesToHex(derEncodedSignature));
+            sigVer = dsa.verify(derEncodedSignature); // for secp224r1
+        } catch (final SignatureException | InvalidKeyException |
+                       NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
+        return sigVer;
+    }
+
     // complete check
-    public static boolean checkDesfireSignature(String publicKey, String tagId, String tagSignature) {
+    public static boolean checkDesfireSignatureBcString(String publicKey, String tagId, String tagSignature) {
         byte[] tagSignatureByte = Utils.hexToBytes(tagSignature);
         byte[] tagIdByte = Utils.hexToBytes(tagId);
         ECPublicKey ecPubKey = null;
@@ -533,6 +633,26 @@ public class DesfireSignature {
     private static void printX(String message) {
         System.out.println(message);
         sb.append(message).append("\n");
+    }
+
+    private static String printData(String dataName, byte[] data) {
+        int dataLength;
+        String dataString = "";
+        if (data == null) {
+            dataLength = 0;
+            dataString = "IS NULL";
+        } else {
+            dataLength = data.length;
+            dataString = Utils.bytesToHex(data);
+        }
+        StringBuilder sb = new StringBuilder();
+        sb
+                .append(dataName)
+                .append(" length: ")
+                .append(dataLength)
+                .append(" data: ")
+                .append(dataString);
+        return sb.toString();
     }
 
 }

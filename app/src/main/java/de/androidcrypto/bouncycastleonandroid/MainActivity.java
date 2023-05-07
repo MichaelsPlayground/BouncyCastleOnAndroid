@@ -80,7 +80,8 @@ public class MainActivity extends AppCompatActivity {
                         clearConsole();
                         initBouncyCastle();
                         printlnX("\n* Mifare DESFire EV2 originality signature *\n");
-                        String result = DesfireSignature.doDesfireSignature();
+                        //String result = DesfireSignature.doDesfireSignature();
+                        String result = DesfireSignature.doDesfireLightSignature();
                         printlnX(result);
                         break;
                     }
